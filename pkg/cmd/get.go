@@ -155,6 +155,10 @@ func handleGetCommand(args []string, outputFormat, selector string, showLabels, 
 		return handleCronJobsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "serviceaccounts", "serviceaccount", "sa":
 		return handleServiceAccountsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "endpoints", "endpoint", "ep":
+		return handleEndpointsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "resourcequotas", "resourcequota", "quota":
+		return handleResourceQuotasGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "networkpolicies", "networkpolicy", "np":
 		return handleNetworkPoliciesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "all":
@@ -185,6 +189,10 @@ func handleGetCommand(args []string, outputFormat, selector string, showLabels, 
 		return handlePVCGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "events", "event", "ev":
 		return handleEventsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "role", "roles":
+		return handleRolesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "storageclasses", "storageclass", "sc":
+		return handleStorageClassesGet(tw, clusters, resourceName, selector, showLabels, outputFormat)
 	default:
 		return handleGenericGet(tw, clusters, resourceType, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	}
@@ -254,6 +262,230 @@ func handleServiceAccountsGet(tw *tabwriter.Writer, clusters []cluster.ClusterIn
 				} else {
 					fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n",
 						clusterInfo.Name, sa.Name, secrets, age)
+				}
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		if allNamespaces {
+			fmt.Fprintf(tw, "No resource found.\n")
+		} else {
+			if namespace == "" {
+				namespace = "default"
+			}
+			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
+		}
+	}
+
+	return nil
+}
+
+func handleEndpointsGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat, namespace string, allNamespaces bool) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		targetNS := cluster.GetTargetNamespace(namespace)
+		if allNamespaces {
+			targetNS = ""
+		}
+
+		endpoints, err := clusterInfo.Client.CoreV1().Endpoints(targetNS).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list endpoints in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(endpoints.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when any items is greater than 0.
+			if allNamespaces {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tENDPOINTS\tAGE\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tENDPOINTS\tAGE\n")
+				}
+			} else {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tENDPOINTS\tAGE\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tENDPOINTS\tAGE\n")
+				}
+			}
+			isHeaderPrint = true
+		}
+
+		for _, ep := range endpoints.Items {
+			if resourceName != "" && ep.Name != resourceName {
+				continue
+			}
+
+			// Format endpoints
+			var endpointsList []string
+			for _, subset := range ep.Subsets {
+				for _, addr := range subset.Addresses {
+					for _, port := range subset.Ports {
+						endpointsList = append(endpointsList, fmt.Sprintf("%s:%d", addr.IP, port.Port))
+					}
+				}
+			}
+
+			endpointsStr := "<none>"
+			if len(endpointsList) > 0 {
+				endpointsStr = strings.Join(endpointsList, ",")
+			}
+
+			age := duration.HumanDuration(time.Since(ep.CreationTimestamp.Time))
+
+			if allNamespaces {
+				if showLabels {
+					labels := util.FormatLabels(ep.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, ep.Namespace, ep.Name, endpointsStr, age, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, ep.Namespace, ep.Name, endpointsStr, age)
+				}
+			} else {
+				if showLabels {
+					labels := util.FormatLabels(ep.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, ep.Name, endpointsStr, age, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, ep.Name, endpointsStr, age)
+				}
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		if allNamespaces {
+			fmt.Fprintf(tw, "No resource found.\n")
+		} else {
+			if namespace == "" {
+				namespace = "default"
+			}
+			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
+		}
+	}
+
+	return nil
+}
+
+func handleResourceQuotasGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat, namespace string, allNamespaces bool) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		targetNS := cluster.GetTargetNamespace(namespace)
+		if allNamespaces {
+			targetNS = ""
+		}
+
+		resourceQuotas, err := clusterInfo.Client.CoreV1().ResourceQuotas(targetNS).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list resourcequotas in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(resourceQuotas.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when any items is greater than 0.
+			if allNamespaces {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tAGE\tHARD\tUSED\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tAGE\tHARD\tUSED\n")
+				}
+			} else {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tAGE\tHARD\tUSED\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tAGE\tHARD\tUSED\n")
+				}
+			}
+			isHeaderPrint = true
+		}
+
+		for _, rq := range resourceQuotas.Items {
+			if resourceName != "" && rq.Name != resourceName {
+				continue
+			}
+
+			age := duration.HumanDuration(time.Since(rq.CreationTimestamp.Time))
+
+			// Format key quota metrics in a structured way
+			hardLimits := rq.Status.Hard
+			usedResources := rq.Status.Used
+
+			// Extract key metrics: CPU, Memory, Pods
+			var hardCPU, hardMemory, hardPods string = "-", "-", "-"
+			var usedCPU, usedMemory, usedPods string = "-", "-", "-"
+
+			if hardLimits != nil {
+				if val, ok := hardLimits["requests.cpu"]; ok {
+					hardCPU = val.String()
+				} else if val, ok := hardLimits["limits.cpu"]; ok {
+					hardCPU = val.String()
+				}
+				if val, ok := hardLimits["requests.memory"]; ok {
+					hardMemory = val.String()
+				} else if val, ok := hardLimits["limits.memory"]; ok {
+					hardMemory = val.String()
+				}
+				if val, ok := hardLimits["pods"]; ok {
+					hardPods = val.String()
+				}
+			}
+
+			if usedResources != nil {
+				if val, ok := usedResources["requests.cpu"]; ok {
+					usedCPU = val.String()
+				} else if val, ok := usedResources["limits.cpu"]; ok {
+					usedCPU = val.String()
+				}
+				if val, ok := usedResources["requests.memory"]; ok {
+					usedMemory = val.String()
+				} else if val, ok := usedResources["limits.memory"]; ok {
+					usedMemory = val.String()
+				}
+				if val, ok := usedResources["pods"]; ok {
+					usedPods = val.String()
+				}
+			}
+
+			hardStr := fmt.Sprintf("cpu:%s,mem:%s,pods:%s", hardCPU, hardMemory, hardPods)
+			usedStr := fmt.Sprintf("cpu:%s,mem:%s,pods:%s", usedCPU, usedMemory, usedPods)
+
+			if allNamespaces {
+				if showLabels {
+					labels := util.FormatLabels(rq.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, rq.Namespace, rq.Name, age, hardStr, usedStr, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, rq.Namespace, rq.Name, age, hardStr, usedStr)
+				}
+			} else {
+				if showLabels {
+					labels := util.FormatLabels(rq.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, rq.Name, age, hardStr, usedStr, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, rq.Name, age, hardStr, usedStr)
 				}
 			}
 		}
@@ -611,6 +843,13 @@ func handleAllGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resource
 	fmt.Println("\n==> PersistentVolumeClaims")
 	tw = tabwriter.NewWriter(util.GetOutputStream(), 0, 0, 2, ' ', 0)
 	if err := handlePVCGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces); err != nil {
+		return err
+	}
+	tw.Flush()
+
+	fmt.Println("\n==> Roles")
+	tw = tabwriter.NewWriter(util.GetOutputStream(), 0, 0, 2, ' ', 0)
+	if err := handleRolesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces); err != nil {
 		return err
 	}
 	tw.Flush()
@@ -1909,6 +2148,158 @@ func handleNetworkPoliciesGet(tw *tabwriter.Writer, clusters []cluster.ClusterIn
 			}
 			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
 		}
+	}
+
+	return nil
+}
+
+func handleRolesGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat, namespace string, allNamespaces bool) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		targetNS := cluster.GetTargetNamespace(namespace)
+		if allNamespaces {
+			targetNS = ""
+		}
+
+		roles, err := clusterInfo.Client.RbacV1().Roles(targetNS).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list roles in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(roles.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when any items is greater than 0.
+			if allNamespaces {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tCREATED-AT\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tCREATED-AT\n")
+				}
+			} else {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tCREATED-AT\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tCREATED-AT\n")
+				}
+			}
+			isHeaderPrint = true
+		}
+
+		for _, role := range roles.Items {
+			if resourceName != "" && role.Name != resourceName {
+				continue
+			}
+
+			if allNamespaces {
+				if showLabels {
+					labels := util.FormatLabels(role.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, role.Namespace, role.Name, role.CreationTimestamp, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, role.Namespace, role.Name, role.CreationTimestamp)
+				}
+			} else {
+				if showLabels {
+					labels := util.FormatLabels(role.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, role.Name, role.CreationTimestamp, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\n",
+						clusterInfo.Name, role.Name, role.CreationTimestamp)
+				}
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		if allNamespaces {
+			fmt.Fprintf(tw, "No resource found.\n")
+		} else {
+			if namespace == "" {
+				namespace = "default"
+			}
+			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
+		}
+	}
+
+	return nil
+}
+
+func handleStorageClassesGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat string) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		storageClasses, err := clusterInfo.Client.StorageV1().StorageClasses().List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list storageclasses in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(storageClasses.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when items len is greater than 0.
+			if showLabels {
+				fmt.Fprintf(tw, "CLUSTER\tNAME\tPROVISIONER\tRECLAIMPOLICY\tVOLUMEBINDINGMODE\tALLOWVOLUMEEXPANSION\tAGE\tLABELS\n")
+			} else {
+				fmt.Fprintf(tw, "CLUSTER\tNAME\tPROVISIONER\tRECLAIMPOLICY\tVOLUMEBINDINGMODE\tALLOWVOLUMEEXPANSION\tAGE\n")
+			}
+			isHeaderPrint = true
+		}
+
+		for _, sc := range storageClasses.Items {
+			if resourceName != "" && sc.Name != resourceName {
+				continue
+			}
+
+			// Get reclaim policy (default to Delete if not set)
+			reclaimPolicy := "Delete"
+			if sc.ReclaimPolicy != nil {
+				reclaimPolicy = string(*sc.ReclaimPolicy)
+			}
+
+			// Get volume binding mode (default to Immediate if not set)
+			volumeBindingMode := "Immediate"
+			if sc.VolumeBindingMode != nil {
+				volumeBindingMode = string(*sc.VolumeBindingMode)
+			}
+
+			// Get allow volume expansion
+			allowVolumeExpansion := "false"
+			if sc.AllowVolumeExpansion != nil && *sc.AllowVolumeExpansion {
+				allowVolumeExpansion = "true"
+			}
+
+			// Calculate age
+			age := duration.HumanDuration(time.Since(sc.CreationTimestamp.Time))
+
+			if showLabels {
+				labels := util.FormatLabels(sc.Labels)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					clusterInfo.Name, sc.Name, sc.Provisioner, reclaimPolicy, volumeBindingMode, allowVolumeExpansion, age, labels)
+			} else {
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					clusterInfo.Name, sc.Name, sc.Provisioner, reclaimPolicy, volumeBindingMode, allowVolumeExpansion, age)
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		fmt.Fprintf(tw, "No resource found.\n")
 	}
 
 	return nil
