@@ -23,7 +23,7 @@ archives:
 changelog:
   use: github
   sort: asc
-  format: "{{ .SHA }}: {{ .Message }} ({{ with .AuthorUsername }}@{{ . }}{{ else }}{{ .AuthorName }}{{ end }} in #{{ .PullRequestNumber }})"
+  format: "{{ .SHA }}: {{ .Message }} ({{ with .AuthorUsername }}@{{ . }}{{ else }}{{ .AuthorName }}{{ end }}"
 
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"
