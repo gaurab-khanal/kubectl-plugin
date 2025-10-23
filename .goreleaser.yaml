@@ -23,7 +23,6 @@ archives:
 changelog:
   use: github
   sort: asc
-  format: "{{.SHA}}: {{.Message}} (@{{.AuthorUsername}})"
 
 checksum:
   name_template: "{{ .ProjectName }}_checksums.txt"
