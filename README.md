@@ -38,11 +38,28 @@ kubectl-multi -v
 
 ```
 
+### Downloading by brew
+```bash
+brew tap Rupam-It/kubectl-multi
+# This looks for: github.com/Rupam-It/homebrew-kubectl-multi ✅
+
+brew install Rupam-It/kubectl-multi/kubectl-multi
+# This also looks for: github.com/Rupam-It/homebrew-kubectl-multi ✅
+
+kubectl-multi -v
+
+#will migrate this soon to kubestellar
+```
+
+
 ## Quick Start for developer
 
 ```bash
 # Install the plugin
 make install
+
+# To build the binary
+make build
 
 # Get nodes from all managed clusters
 kubectl multi get nodes
