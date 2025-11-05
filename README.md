@@ -39,16 +39,14 @@ kubectl-multi -v
 ```
 
 ### Downloading by brew
-```bash
-brew tap Rupam-It/kubectl-multi
-# This looks for: github.com/Rupam-It/homebrew-kubectl-multi ✅
+```bash 
+# This looks for: github.com/kubestellar/homebrew-kubectl-multi ✅
+brew tap kubestellar/kubectl-multi
 
-brew install Rupam-It/kubectl-multi/kubectl-multi
-# This also looks for: github.com/Rupam-It/homebrew-kubectl-multi ✅
+# This also looks for: github.com/kubestellar/homebrew-kubectl-multi ✅
+brew install kubestellar/kubectl-multi/kubectl-multi
 
 kubectl-multi -v
-
-#will migrate this soon to kubestellar
 ```
 
 
