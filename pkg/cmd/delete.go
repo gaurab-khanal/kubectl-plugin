@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 
+	"kubectl-multi/pkg/cluster"
 	"kubectl-multi/pkg/util"
 
 	"github.com/spf13/cobra"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Custom help function for delete command
@@ -47,18 +49,147 @@ kubectl multi delete pod nginx --force`
 }
 
 func newDeleteCommand() *cobra.Command {
+	var filename string
+	var recursive bool
+	var dryRun string
+
 	cmd := &cobra.Command{
 		Use:   "delete [TYPE[.VERSION][.GROUP] [NAME | -l label] | TYPE[.VERSION][.GROUP]/NAME ...]",
 		Short: "Delete resources across all managed clusters",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("delete command not yet implemented")
+
+			kubeconfig, remoteCtx, _, namespace, allNamespaces := GetGlobalFlags()
+			return handleDeleteCommand(args, filename, recursive, dryRun, kubeconfig, remoteCtx, namespace, allNamespaces)
 		},
 	}
+
+	cmd.Flags().StringVarP(&filename, "filename", "f", "", "filename, directory, or URL to files to use to delete the resource")
+	cmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "process the directory used in -f, --filename recursively")
+	cmd.Flags().StringVar(&dryRun, "dry-run", "none", "must be \"none\", \"server\", or \"client\"")
 
 	// Set custom help function
 	cmd.SetHelpFunc(deleteHelpFunc)
 
 	return cmd
+}
+
+func handleDeleteCommand(args []string, filename string, recursive bool, dryRun, kubeconfig, remoteCtx, namespace string, allNamespaces bool) error {
+
+	var isFileProvided bool
+	var resourceName string
+	var resourceType string
+
+	if len(args) != 0 && filename != "" {
+		return fmt.Errorf("provide either filename or resource type at a time")
+	}
+
+	if filename != "" {
+		isFileProvided = true
+	} else {
+		isFileProvided = false // in this case reource type is provided.
+		resourceType = args[0]
+		resourceName = ""
+		if len(args) > 1 {
+			resourceName = args[1]
+		}
+	}
+
+	clusters, err := cluster.DiscoverClusters(kubeconfig, remoteCtx)
+	if err != nil {
+		return fmt.Errorf("failed to discover clusters: %v", err)
+	}
+	if len(clusters) == 0 {
+		return fmt.Errorf("no clusters discovered")
+	}
+
+	// Find current context from kubeconfig
+	currentContext := ""
+	{
+		loading := clientcmd.NewDefaultClientConfigLoadingRules()
+		if kubeconfig != "" {
+			loading.ExplicitPath = kubeconfig
+		}
+		cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loading, &clientcmd.ConfigOverrides{})
+		rawCfg, err := cfg.RawConfig()
+		if err == nil {
+			currentContext = rawCfg.CurrentContext
+		}
+	}
+
+	// Identify ITS (control) cluster context
+	itsContext := remoteCtx
+
+	// Build maps for quick lookup
+	contextToCluster := make(map[string]cluster.ClusterInfo)
+	for _, c := range clusters {
+		contextToCluster[c.Context] = c
+	}
+
+	// 1. Run for current context (if present)
+	if cinfo, ok := contextToCluster[currentContext]; ok {
+		var args []string
+		if isFileProvided {
+			args = []string{"delete", "-f", filename, "--context", cinfo.Context}
+		} else {
+			args = []string{"delete", resourceType, resourceName, "--context", cinfo.Context}
+		}
+		if recursive {
+			args = append(args, "-R")
+		}
+		if dryRun != "none" && dryRun != "" {
+			args = append(args, "--dry-run="+dryRun)
+		}
+		if namespace != "" {
+			args = append(args, "-n", namespace)
+		}
+		output, err := runKubectl(args, kubeconfig)
+		fmt.Printf("=== Cluster: %s ===\n", cinfo.Context)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		} else {
+			fmt.Print(output)
+		}
+		fmt.Println()
+	}
+
+	// 2. Run for KubeStellar clusters (excluding ITS and current)
+	for _, c := range clusters {
+		if c.Context == currentContext || c.Context == itsContext {
+			continue
+		}
+		var args []string
+		if isFileProvided {
+			args = []string{"delete", "-f", filename, "--context", c.Context}
+		} else {
+			args = []string{"delete", resourceType, resourceName, "--context", c.Context}
+		}
+		if recursive {
+			args = append(args, "-R")
+		}
+		if dryRun != "none" && dryRun != "" {
+			args = append(args, "--dry-run="+dryRun)
+		}
+		if namespace != "" {
+			args = append(args, "-n", namespace)
+		}
+		output, err := runKubectl(args, kubeconfig)
+		fmt.Printf("=== Cluster: %s ===\n", c.Context)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		} else {
+			fmt.Print(output)
+		}
+		fmt.Println()
+	}
+
+	// 3. Print warning for ITS (control) cluster
+	if cinfo, ok := contextToCluster[itsContext]; ok {
+		fmt.Printf("=== Cluster: %s ===\n", cinfo.Context)
+		fmt.Printf("Cannot perform this operation on ITS (control) cluster: %s\n", cinfo.Context)
+		fmt.Println()
+	}
+
+	return nil
 }
 
 func newExecCommand() *cobra.Command {
