@@ -83,8 +83,9 @@ const helpTemplate = `{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "kubectl-multi",
-	Short: "Multi-cluster kubectl operations for KubeStellar",
+	Use:     "kubectl-multi",
+	Version: util.Version,
+	Short:   "Multi-cluster kubectl operations for KubeStellar",
 	Long: `kubectl-multi provides multi-cluster operations for KubeStellar managed clusters.
 It executes kubectl commands across all managed clusters and presents unified output.
 
@@ -150,6 +151,7 @@ func init() {
 	rootCmd.AddCommand(newTopCommand())
 	rootCmd.AddCommand(newRunCommand())
 	rootCmd.AddCommand(newMultiGetCommand()) // Register multiget
+	rootCmd.AddCommand(util.VersionCmd)
 
 	// Add the install command - NEW LINE
 	streams := genericclioptions.IOStreams{

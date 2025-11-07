@@ -175,6 +175,8 @@ func handleGetCommand(args []string, outputFormat, selector string, showLabels, 
 		return handleEndpointsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "resourcequotas", "resourcequota", "quota":
 		return handleResourceQuotasGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "limitranges", "limitrange", "limits":
+		return handleLimitRangesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "networkpolicies", "networkpolicy", "np":
 		return handleNetworkPoliciesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "all":
@@ -207,6 +209,8 @@ func handleGetCommand(args []string, outputFormat, selector string, showLabels, 
 		return handleEventsGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	case "role", "roles":
 		return handleRolesGet(tw, clusters, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
+	case "storageclasses", "storageclass", "sc":
+		return handleStorageClassesGet(tw, clusters, resourceName, selector, showLabels, outputFormat)
 	default:
 		return handleGenericGet(tw, clusters, resourceType, resourceName, selector, showLabels, outputFormat, namespace, allNamespaces)
 	}
@@ -500,6 +504,89 @@ func handleResourceQuotasGet(tw *tabwriter.Writer, clusters []cluster.ClusterInf
 				} else {
 					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 						clusterInfo.Name, rq.Name, age, hardStr, usedStr)
+				}
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		if allNamespaces {
+			fmt.Fprintf(tw, "No resource found.\n")
+		} else {
+			if namespace == "" {
+				namespace = "default"
+			}
+			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
+		}
+	}
+
+	return nil
+}
+
+func handleLimitRangesGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat, namespace string, allNamespaces bool) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		targetNS := cluster.GetTargetNamespace(namespace)
+		if allNamespaces {
+			targetNS = ""
+		}
+
+		limitRanges, err := clusterInfo.Client.CoreV1().LimitRanges(targetNS).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list limitranges in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(limitRanges.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when any items is greater than 0.
+			if allNamespaces {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tCREATED AT\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAMESPACE\tNAME\tCREATED AT\n")
+				}
+			} else {
+				if showLabels {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tCREATED AT\tLABELS\n")
+				} else {
+					fmt.Fprintf(tw, "CLUSTER\tNAME\tCREATED AT\n")
+				}
+			}
+			isHeaderPrint = true
+		}
+
+		for _, lr := range limitRanges.Items {
+			if resourceName != "" && lr.Name != resourceName {
+				continue
+			}
+
+			age := duration.HumanDuration(time.Since(lr.CreationTimestamp.Time))
+
+			if allNamespaces {
+				if showLabels {
+					labels := util.FormatLabels(lr.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, lr.Namespace, lr.Name, age, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, lr.Namespace, lr.Name, age)
+				}
+			} else {
+				if showLabels {
+					labels := util.FormatLabels(lr.Labels)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+						clusterInfo.Name, lr.Name, age, labels)
+				} else {
+					fmt.Fprintf(tw, "%s\t%s\t%s\n",
+						clusterInfo.Name, lr.Name, age)
 				}
 			}
 		}
@@ -2243,6 +2330,77 @@ func handleRolesGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resour
 			}
 			fmt.Fprintf(tw, "No resource found in %s namespace.\n", namespace)
 		}
+	}
+
+	return nil
+}
+
+func handleStorageClassesGet(tw *tabwriter.Writer, clusters []cluster.ClusterInfo, resourceName, selector string, showLabels bool, outputFormat string) error {
+	isHeaderPrint := false
+
+	for _, clusterInfo := range clusters {
+		if clusterInfo.Client == nil {
+			continue
+		}
+
+		storageClasses, err := clusterInfo.Client.StorageV1().StorageClasses().List(context.TODO(), metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			fmt.Printf("Warning: failed to list storageclasses in cluster %s: %v\n", clusterInfo.Name, err)
+			continue
+		}
+
+		if len(storageClasses.Items) > 0 && !isHeaderPrint {
+			// Print header only once at top when items len is greater than 0.
+			if showLabels {
+				fmt.Fprintf(tw, "CLUSTER\tNAME\tPROVISIONER\tRECLAIMPOLICY\tVOLUMEBINDINGMODE\tALLOWVOLUMEEXPANSION\tAGE\tLABELS\n")
+			} else {
+				fmt.Fprintf(tw, "CLUSTER\tNAME\tPROVISIONER\tRECLAIMPOLICY\tVOLUMEBINDINGMODE\tALLOWVOLUMEEXPANSION\tAGE\n")
+			}
+			isHeaderPrint = true
+		}
+
+		for _, sc := range storageClasses.Items {
+			if resourceName != "" && sc.Name != resourceName {
+				continue
+			}
+
+			// Get reclaim policy (default to Delete if not set)
+			reclaimPolicy := "Delete"
+			if sc.ReclaimPolicy != nil {
+				reclaimPolicy = string(*sc.ReclaimPolicy)
+			}
+
+			// Get volume binding mode (default to Immediate if not set)
+			volumeBindingMode := "Immediate"
+			if sc.VolumeBindingMode != nil {
+				volumeBindingMode = string(*sc.VolumeBindingMode)
+			}
+
+			// Get allow volume expansion
+			allowVolumeExpansion := "false"
+			if sc.AllowVolumeExpansion != nil && *sc.AllowVolumeExpansion {
+				allowVolumeExpansion = "true"
+			}
+
+			// Calculate age
+			age := duration.HumanDuration(time.Since(sc.CreationTimestamp.Time))
+
+			if showLabels {
+				labels := util.FormatLabels(sc.Labels)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					clusterInfo.Name, sc.Name, sc.Provisioner, reclaimPolicy, volumeBindingMode, allowVolumeExpansion, age, labels)
+			} else {
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					clusterInfo.Name, sc.Name, sc.Provisioner, reclaimPolicy, volumeBindingMode, allowVolumeExpansion, age)
+			}
+		}
+	}
+
+	if !isHeaderPrint {
+		// print no resource found if isHeaderPrint is still false at this point
+		fmt.Fprintf(tw, "No resource found.\n")
 	}
 
 	return nil
